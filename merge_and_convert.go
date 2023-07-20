@@ -14,10 +14,9 @@ import (
 
 func main() {
 
-	tsOutputFileName := "merged_video.ts"
-	mp4OutputFileName := "output.mp4"
-	listFileName := "file_list.txt"
-	tsFilesPattern := "*.ts"
+	mp4OutputFileName := "output.mp4" // Output file name for the final merged and converted video
+	listFileName := "file_list.txt"   // File name for the temporary file list
+	tsFilesPattern := "*.ts"          // Pattern to match the input .ts files
 
 	// Get the current working directory
 	wd, e := os.Getwd()
@@ -49,24 +48,49 @@ func main() {
 	}
 	writer.Flush()
 
-	// // Prepare the FFMPEG command to merge the TS files
-	ffmpegMergeCommand := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", listFileName, "-c", "copy", tsOutputFileName)
-	ffmpegMergeCommand.Stdout = os.Stdout
-	ffmpegMergeCommand.Stderr = os.Stderr
+	// Merge audio streams from the .ts files into a single audio file
+	ffmpegMergeAudioCommand := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", listFileName, "-map", "0:0", "-map", "0:1", "-c", "copy", "-strict", "-2", "-vn", "audio.ts")
+	ffmpegMergeAudioCommand.Stdout = os.Stdout
+	ffmpegMergeAudioCommand.Stderr = os.Stderr
 
-	// Run the FFMPEG command to merge the TS files
-	if e := ffmpegMergeCommand.Run(); e != nil {
+	if e := ffmpegMergeAudioCommand.Run(); e != nil {
+		log.Fatalf("Failed to merge audio files: %s", e)
+	}
+
+	// Merge video streams from the .ts files into a single video file
+	ffmpegMergeVideoCommand := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", listFileName, "-map", "0:0", "-map", "0:1", "-an", "-c", "copy", "video.ts")
+	ffmpegMergeVideoCommand.Stdout = os.Stdout
+	ffmpegMergeVideoCommand.Stderr = os.Stderr
+
+	if e := ffmpegMergeVideoCommand.Run(); e != nil {
 		log.Fatalf("Failed to merge video files: %s", e)
 	}
 
-	// Prepare the FFMPEG command to convert the merged TS file to MP4
-	ffmpegConvertCommand := exec.Command("ffmpeg", "-i", tsOutputFileName, "-c:v", "h264_nvenc", "-c:a", "aac", mp4OutputFileName)
+	// Convert the merged audio file to FLAC format
+	ffmpegFlacCommand := exec.Command("ffmpeg", "-i", "audio.ts", "-map", "0:0", "-codec:a", "flac", "-ac", "2", "-ar", "48000", "-sample_fmt", "s16", "audio.flac")
+	ffmpegFlacCommand.Stdout = os.Stdout
+	ffmpegFlacCommand.Stderr = os.Stderr
+
+	if e := ffmpegFlacCommand.Run(); e != nil {
+		log.Fatalf("Failed to convert audio file to FLAC: %s", e)
+	}
+
+	// Convert the merged video file to MP4 format
+	ffmpegConvertCommand := exec.Command("ffmpeg", "-i", "video.ts", "-map", "0:0", "-c", "copy", "-an", "video.mp4")
 	ffmpegConvertCommand.Stdout = os.Stdout
 	ffmpegConvertCommand.Stderr = os.Stderr
 
-	// Run the FFMPEG command to convert the merged TS file to MP4
 	if e := ffmpegConvertCommand.Run(); e != nil {
-		log.Fatalf("Failed to convert merged video file to MP4: %s", e)
+		log.Fatalf("Failed to convert video file to MP4: %s", e)
+	}
+
+	// Merge the converted video and audio files into a final MP4 file
+	ffmpegMergeCommand := exec.Command("ffmpeg", "-i", "video.mp4", "-i", "audio.flac", "-c", "copy", "-map", "0:0", "-map", "1:0", "-map_metadata", "-1", "-movflags", "+faststart", "-strict", "-3", "-f", "mp4", mp4OutputFileName)
+	ffmpegMergeCommand.Stdout = os.Stdout
+	ffmpegMergeCommand.Stderr = os.Stderr
+
+	if e := ffmpegMergeCommand.Run(); e != nil {
+		log.Fatalf("Failed to merge video and audio files: %s", e)
 	}
 
 	fmt.Printf("Video files merged and converted to MP4 successfully. Output file: %s\n", mp4OutputFileName)
